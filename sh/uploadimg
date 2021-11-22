@@ -1,0 +1,3 @@
+cd $SCRIPTROOT/uploadImg
+python3 $SCRIPTROOT/uploadImg/uploadImg.py
+cd -

@@ -1,0 +1,3 @@
+[submodule "uploadImg"]
+	path = uploadImg
+	url = git@github.com:Drincann/uploadImg.git
