@@ -1,1 +1,1 @@
-python3 $SCRIPTROOT/autoupload.py -d ~/doc
+python3 $SCRIPTROOT/autoupload.py -d ~/sync/doc -i 1800 -t 1440
