@@ -1,0 +1,7 @@
+let timer=1
+while True; do
+  sleep 1
+  timer=$[timer + 1]
+  clear
+  echo $[timer / 3600]:$[(timer % 3600) / 60]:$[timer % 60]
+done
