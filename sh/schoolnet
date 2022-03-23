@@ -1,0 +1,8 @@
+while True
+do
+	pid=$(pgrep -f Ruijie)
+	echo $pid
+	sudo kill $pid
+	sudo "/Applications/Ruijie Supplicant 2.app/Contents/MacOS/Supplicant"
+	sleep $((4 * 60))
+done
