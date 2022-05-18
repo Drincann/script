@@ -1,8 +1,8 @@
-while True
-do
-	pid=$(pgrep -f Ruijie)
-	echo $pid
-	sudo kill $pid
-	sudo "/Applications/Ruijie Supplicant 2.app/Contents/MacOS/Supplicant"
-	sleep $((4 * 60))
-done
+sudo "/Applications/Ruijie Supplicant 2.app/Contents/MacOS/Supplicant"
+pid=$(pgrep -f Ruijie)
+echo $pid
+sleep $((5))
+sudo $SHROOT/mentohust-macos-arm64 -w -u2019984040519 -p050917 -nen6 -a1 -d2 -b2 
+sleep $((5))
+sudo kill $pid
+
