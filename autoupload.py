@@ -54,7 +54,7 @@ async def main():
 """
         )
 
-        stdout = os.popen(f'git pull').read()
+        stdout = os.popen(f'git pull --rebase').read()
         stdout = os.popen(f'git add .').read()
         stdout = os.popen(f'git commit -m "auto upload {strtime}"').read()
         print(stdout)
