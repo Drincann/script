@@ -1,0 +1,3 @@
+#!/bin/bash
+
+/Users/drincanngao/.pyenv/shims/python "$SCRIPTROOT/worklg/main.py" "$@"
