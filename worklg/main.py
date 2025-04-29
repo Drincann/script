@@ -56,7 +56,10 @@ def select_task(tasks, selector: str):
 
 
 @app.command()
-def start(selector: str):
+def start(
+    selector: str,
+    at: Optional[str] = typer.Option(None, "--at", help="开始时间 hh:mm"),
+):
     """开始或继续一个任务 (支持编号/关键词，新建任务也可以；智能连接最近session)"""
     date_str = today_date()
     tasks = read_tasks(date_str)
@@ -76,14 +79,15 @@ def start(selector: str):
         tasks.append(task)
         print(f"[green]新建任务:[/green] {selector}")
 
-    now = datetime.now()
+    start_at = datetime.now() if at == None else datetime.fromisoformat(f"{date_str}T{at}:00")
+    print("start() at=" + str(at) + " start_at=" + str(start_at))
 
     # 查找最后一个 session
     last_session = task["sessions"][-1] if task["sessions"] else None
 
     if last_session and last_session["end_time"]:
         end_time = datetime.fromisoformat(last_session["end_time"])
-        diff_sec = (now - end_time).total_seconds()
+        diff_sec = (start_at - end_time).total_seconds()
 
         if diff_sec <= 60:
             # 恢复上一个 session
@@ -91,38 +95,58 @@ def start(selector: str):
             print(f"[green]继续上一个session (距上次结束{int(diff_sec)}秒内)[/green]")
         else:
             # 新开session
-            task["sessions"].append({"start_time": now_iso(), "end_time": None})
+            task["sessions"].append({
+                "start_time": start_at.isoformat(timespec="seconds"),
+                "end_time": None
+            })
             print(f"[green]开始新的session (与上次间隔超过1分钟)[/green]")
     else:
         # 没有历史session，正常新建
-        task["sessions"].append({"start_time": now_iso(), "end_time": None})
+        task["sessions"].append({
+            "start_time": start_at.isoformat(timespec="seconds"),
+            "end_time": None
+        })
 
     write_tasks(date_str, tasks)
     print(f"[green]已开始任务:[/green] {task['description']}")
 
 
 @app.command()
-def stop(*, from_cmd: bool = False):
+def stop(
+    at: Optional[str] = typer.Option(None, "--at", help="结束时间 hh:mm"),
+    from_cmd: bool = False, 
+):
     """停止当前任务"""
     date_str = today_date()
     tasks = read_tasks(date_str)
     for task in tasks:
         for session in task["sessions"]:
             if session["end_time"] is None:
-                session["end_time"] = now_iso()
+                if at != None:
+                    end_time = datetime.fromisoformat(f"{date_str}T{at}:00")
+                    if end_time > datetime.now():
+                        print("[red]结束时间不能晚于现在[/red]")
+                        raise typer.Exit()
+                else:
+                    end_time = datetime.now()
+                session["end_time"] = end_time.isoformat(timespec="seconds")
                 write_tasks(date_str, tasks)
                 if not from_cmd:
                     print(f"[green]已结束当前任务:[/green] {task['description']}")
                 return
     if not from_cmd:
-      print("[red]没有正在进行中的任务[/red]")
+        print("[red]没有正在进行中的任务[/red]")
 
 
 @app.command()
-def push(selector: str):
+def push(
+    selector: str,
+    start_at: Optional[str] = typer.Option(None, "--at", help="起始时间 hh:mm"),
+):
     """切换到新的任务 (支持编号/关键词)"""
-    stop(from_cmd=True)
-    start(selector)
+    print("at=" + str(start_at))
+    stop(from_cmd=True, at=start_at)
+    start(selector, at=start_at)
 
 @app.command()
 def pop():
@@ -167,71 +191,7 @@ def pop():
         print("[yellow]没有找到可以恢复的上一个任务[/yellow]")
 
 @app.command()
-def split(new_description: str):
-    """把当前进行中的任务一分为二，补录新的任务"""
-    date_str = today_date()
-    tasks = read_tasks(date_str)
-
-    # 找到当前进行中的任务
-    current_task = None
-    for task in tasks:
-        for sess in task["sessions"]:
-            if sess["end_time"] is None:
-                current_task = (task, sess)
-                break
-        if current_task:
-            break
-
-    if not current_task:
-        print("[yellow]当前没有正在进行的任务，无法split[/yellow]")
-        raise typer.Exit()
-    if current_task[0]["description"] == new_description:
-        print("[red]新任务描述不能和当前任务相同[/red]")
-        raise typer.Exit()
-
-    task, session = current_task
-
-    # 询问打断的时间
-    interrupt_time = input("请输入被打断的时间 (格式 HH:MM): ").strip()
-    try:
-        today = datetime.now().strftime("%Y-%m-%d")
-        interrupt_dt = datetime.fromisoformat(f"{today}T{interrupt_time}:00")
-        now_dt = datetime.now()
-
-        # 校验时间合法
-        if interrupt_dt < datetime.fromisoformat(session["start_time"]):
-            print("[red]打断时间不能早于session开始时间[/red]")
-            raise typer.Exit()
-        if interrupt_dt > now_dt:
-            print("[red]打断时间不能晚于现在[/red]")
-            raise typer.Exit(f"{interrupt_time} > {now_dt.strftime('%H:%M')}")
-    except Exception as e:
-        print(f"[red]输入时间格式错误: {e}[/red]")
-        raise typer.Exit()
-
-    # 切割
-    session["end_time"] = interrupt_dt.isoformat(timespec="seconds")
-
-    # 新建一个新的任务
-    new_task = {
-        "id": gen_id(),
-        "description": new_description,
-        "sessions": [
-            {
-                "start_time": interrupt_dt.isoformat(timespec="seconds"),
-                "end_time": now_iso(),
-            }
-        ],
-    }
-    tasks.append(new_task)
-
-    write_tasks(date_str, tasks)
-    print(f"[green]已补录新任务:[/green] {new_description}")
-    print("[yellow]当前没有正在进行的任务，请根据需要重新 start/push[/yellow]")
-
-
-@app.command()
-def current():
+def curr():
     """查看当前正在进行的任务"""
     date_str = today_date()
     tasks = read_tasks(date_str)
@@ -249,7 +209,7 @@ def current():
     print("[yellow]当前没有正在进行的任务[/yellow]")
 
 
-@view_app.command("timeline")
+@app.command("tl")
 def view_timeline(
     from_date: Optional[str] = typer.Option(None, "--from", help="起始日期 YYYY-MM-DD"),
     to_date: Optional[str] = typer.Option(None, "--to", help="结束日期 YYYY-MM-DD"),
@@ -350,8 +310,6 @@ def render_single_day_timeline(sessions):
 
 from collections import defaultdict
 
-from collections import defaultdict
-
 def render_multi_day_timeline(sessions):
     """渲染多天 task 聚合粒度 timeline，带跨天session分割和起止时间"""
     # 每天 {task -> {"minutes":总分钟数, "start":最早start, "end":最晚end}}
@@ -434,7 +392,7 @@ def render_session(start, end, desc, color, is_running, max_duration, note=None)
     console.print(line)
 
 
-@view_app.command("task")
+@app.command("task")
 def view_task(selector: str):
     """查看单个任务的所有 session 详细信息 (带Time Bar)"""
     date_str = today_date()
@@ -485,9 +443,13 @@ def view_task(selector: str):
     console.print(table)
 
 
-@view_app.command("tasks")
-def view_tasks():
+@app.command("ls")
+def view_tasks(selector: Optional[str] = typer.Argument(None)):
     """按任务维度的表格视图 (带编号)"""
+    if selector != None:
+        view_task(selector)
+        return
+
     date_str = today_date()
     tasks = read_tasks(date_str)
 
@@ -568,7 +530,7 @@ def has_conflict(tasks, new_start: datetime, new_end: datetime):
             sess_start = datetime.fromisoformat(sess["start_time"])
             sess_end = datetime.fromisoformat(sess["end_time"] or now_iso())
 
-            if sess_start < new_end and new_start < sess_end:
+            if new_end != None and sess_start < new_end and new_start < sess_end:
                 return True, task["description"], sess_start, sess_end
 
     return False, None, None, None
@@ -586,12 +548,12 @@ def retro(description: str):
     try:
         today = datetime.now().strftime("%Y-%m-%d")
         start_dt = datetime.fromisoformat(f"{today}T{start_input}:00")
-        end_dt = datetime.fromisoformat(f"{today}T{end_input}:00")
+        end_dt = datetime.fromisoformat(f"{today}T{end_input}:00") if len(end_input) != 0 else None
 
-        if start_dt >= end_dt:
+        if end_dt != None and start_dt >= end_dt:
             print("[red]开始时间必须早于结束时间[/red]")
             raise typer.Exit()
-        if end_dt > datetime.now():
+        if end_dt != None and end_dt > datetime.now():
             print("[red]结束时间不能晚于现在[/red]")
             raise typer.Exit()
 
@@ -633,12 +595,12 @@ def retro(description: str):
     task["sessions"].append(
         {
             "start_time": start_dt.isoformat(timespec="seconds"),
-            "end_time": end_dt.isoformat(timespec="seconds"),
+            "end_time": end_dt.isoformat(timespec="seconds") if end_dt != None else None,
         }
     )
 
     write_tasks(date_str, tasks)
-    print(f"[green]已补录session:[/green] {start_input} - {end_input} -> {description}")
+    print(f"[green]已补录session:[/green] {start_input} -> {end_input}  {task['description']}")
 
 
 @app.command()
@@ -690,7 +652,10 @@ def note_select():
     note_content = input("请输入备注内容: ").strip()
 
     task, idx, _ = sessions[choice]
-    task["sessions"][idx]["note"] = note_content
+
+    record_time_str = datetime.fromisoformat(now_iso()).strftime("%H:%M")
+    task["sessions"][idx]["note"] = task["sessions"][idx].get("note", "") +  ("\n\n" if "note" in task["sessions"][idx] else "") + f"[{record_time_str}] {note_content}"
+
     write_tasks(date_str, tasks)
 
     print(f"[green]已添加备注:[/green] {note_content}")
