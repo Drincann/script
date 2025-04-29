@@ -80,7 +80,6 @@ def start(
         print(f"[green]新建任务:[/green] {selector}")
 
     start_at = datetime.now() if at == None else datetime.fromisoformat(f"{date_str}T{at}:00")
-    print("start() at=" + str(at) + " start_at=" + str(start_at))
 
     # 查找最后一个 session
     last_session = task["sessions"][-1] if task["sessions"] else None
@@ -144,7 +143,6 @@ def push(
     start_at: Optional[str] = typer.Option(None, "--at", help="起始时间 hh:mm"),
 ):
     """切换到新的任务 (支持编号/关键词)"""
-    print("at=" + str(start_at))
     stop(from_cmd=True, at=start_at)
     start(selector, at=start_at)
 
@@ -457,14 +455,7 @@ def view_tasks(selector: Optional[str] = typer.Argument(None)):
         print("[yellow]当天没有任务记录[/yellow]")
         return
 
-    table = Table(show_header=True, header_style="bold blue")
-    table.add_column("No.", width=3)
-    table.add_column("Task", width=50)
-    table.add_column("Start", width=6)
-    table.add_column("End", width=6)
-    table.add_column("Duration", width=8)
-    table.add_column("")
-
+    top_minutes = 0
     total_minutes = 0
     task_infos = []
 
@@ -479,7 +470,8 @@ def view_tasks(selector: Optional[str] = typer.Argument(None)):
             duration_minutes(s["start_time"], s["end_time"] or now_iso())
             for s in sessions
         )
-        total_minutes = max(total_minutes, dur)
+        total_minutes += dur
+        top_minutes = max(top_minutes, dur)
 
         task_infos.append(
             {
@@ -503,6 +495,15 @@ def view_tasks(selector: Optional[str] = typer.Argument(None)):
                 latest_end_time = info['end_time']
                 top_task_id = info['task_id']
 
+    # render
+    table = Table(show_header=True, header_style="bold blue")
+    table.add_column("No.", width=3)
+    table.add_column("Task", width=50)
+    table.add_column("Start", width=6)
+    table.add_column("End", width=6)
+    table.add_column("Duration", width=8)
+    table.add_column(format_duration(total_minutes), width=10)
+
     for idx, info in enumerate(task_infos, 1):
         description_str = info["description"]
         if info['task_id'] == top_task_id:
@@ -515,7 +516,7 @@ def view_tasks(selector: Optional[str] = typer.Argument(None)):
         )
         dur_fmt = format_duration(info["duration"])
 
-        bar_len = max(1, int(info["duration"] / total_minutes * 10))
+        bar_len = max(1, int(info["duration"] / top_minutes * 10))
         bar = "▓" * bar_len
 
         table.add_row(str(idx), description_str, start_str, end_str, dur_fmt, bar)
