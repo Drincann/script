@@ -1,3 +1,4 @@
+import colorsys
 import hashlib
 from datetime import datetime
 import uuid
@@ -23,9 +24,17 @@ def format_duration(minutes):
 
 def pick_color_rgb(description):
     h = hashlib.md5(description.encode()).hexdigest()
-    r = int(h[0:2], 16)
-    g = int(h[2:4], 16)
-    b = int(h[4:6], 16)
+    hue = int(h[0:256], 16) % 360
+    if 220 <= hue <= 280: # 避开蓝紫色，人眼不好分辨
+        hue = (hue + 60) % 360
+    saturation = 0.6 + (int(h[4:6], 16) / 255) * 0.4  # 60%-100% 饱和度
+    value = 0.7 + (int(h[6:8], 16) / 255) * 0.3       # 70%-100% 明度
+
+    r, g, b = colorsys.hsv_to_rgb(hue / 360, saturation, value)
+    r = int(r * 255)
+    g = int(g * 255)
+    b = int(b * 255)
+
     return f"rgb({r},{g},{b})"
 
 from wcwidth import wcswidth
