@@ -22,20 +22,48 @@ def format_duration(minutes):
     mins = minutes % 60
     return f"{hours}h{mins:02d}m"
 
-def pick_color_rgb(description):
-    h = hashlib.md5(description.encode()).hexdigest()
-    hue = int(h[0:256], 16) % 360
-    if 220 <= hue <= 280: # 避开蓝紫色，人眼不好分辨
-        hue = (hue + 60) % 360
-    saturation = 0.6 + (int(h[4:6], 16) / 255) * 0.4  # 60%-100% 饱和度
-    value = 0.7 + (int(h[6:8], 16) / 255) * 0.3       # 70%-100% 明度
+used_colors = []
 
-    r, g, b = colorsys.hsv_to_rgb(hue / 360, saturation, value)
-    r = int(r * 255)
-    g = int(g * 255)
-    b = int(b * 255)
+def color_distance(c1, c2):
+    """返回两个 RGB 颜色的欧几里得距离"""
+    return ((c1[0]-c2[0])**2 + (c1[1]-c2[1])**2 + (c1[2]-c2[2])**2) ** 0.5
 
-    return f"rgb({r},{g},{b})"
+def pick_color_rgb(description, max_retry=10, similarity_threshold=30):
+    global used_colors
+
+    salt = 0
+    for _ in range(max_retry):
+        h = hashlib.md5((description + str(salt)).encode()).hexdigest()
+        raw_hue = int(h[0:256], 16)
+
+        # 避开紫色、深蓝区间：只用 0–220 和 320–360
+        allowed_ranges = [(0, 220), (320, 360)]
+        total_range = sum(end - start for start, end in allowed_ranges)
+        hue_selector = raw_hue % total_range
+        for start, end in allowed_ranges:
+            length = end - start
+            if hue_selector < length:
+                hue = start + hue_selector
+                break
+            hue_selector -= length
+
+        saturation = 0.85 + (int(h[6:8], 16) / 255) * 0.15
+        value = 0.9 + (int(h[8:10], 16) / 255) * 0.1
+
+        r, g, b = colorsys.hsv_to_rgb(hue / 360, saturation, value)
+        rgb = (int(r * 255), int(g * 255), int(b * 255))
+
+        # 距离判定：是否太接近已使用的颜色
+        if all(color_distance(rgb, used) >= similarity_threshold for used in used_colors):
+            used_colors.append(rgb)
+            return f"rgb({rgb[0]},{rgb[1]},{rgb[2]})"
+
+        # 否则 hash 加点随机偏移，尝试生成下一个候选颜色
+        salt += 1
+
+    # 如果多次尝试都太像，就无奈接受最后一个
+    used_colors.append(rgb)
+    return f"rgb({rgb[0]},{rgb[1]},{rgb[2]})"
 
 from wcwidth import wcswidth
 
@@ -66,3 +94,7 @@ def smart_truncate(text, max_width):
         current_width += char_width
 
     return truncated + '...'
+
+def percent(floatValue):
+    """格式化百分比，保留两位小数"""
+    return f"{floatValue:.2%}"

@@ -9,9 +9,9 @@ from typing import Optional
 from storage import read_tasks, write_tasks
 from utils import (
     now_iso,
+    percent,
     today_date,
     smart_ljust,
-    smart_rjust,
     smart_truncate,
     gen_id,
     duration_minutes,
@@ -147,8 +147,21 @@ def push(
     start(selector, at=start_at)
 
 @app.command()
-def pop():
+def pop(
+    delete: bool = typer.Option(False, "--delete", help="删除当前任务"),
+):
     """结束当前任务并恢复上一个任务"""
+    if delete:
+        date_str = today_date()
+        tasks = read_tasks(date_str)
+        for task in tasks:
+            for sess in task['sessions']:
+                if sess['end_time'] is None:
+                    task['sessions'].remove(sess)
+                    write_tasks(date_str, tasks)
+                    print(f"[green]已删除当前 session:[/green] {task['description']}")
+                    return
+        print("[red]没有正在进行中的任务[/red]")
     date_str = today_date()
     tasks = read_tasks(date_str)
 
@@ -209,7 +222,7 @@ def curr():
 
 @app.command("tl")
 def view_timeline(
-    from_date: Optional[str] = typer.Option(None, "--from", help="起始日期 YYYY-MM-DD"),
+    from_date: Optional[str] = typer.Option(None, "--from", "--at", help="起始日期 YYYY-MM-DD"),
     to_date: Optional[str] = typer.Option(None, "--to", help="结束日期 YYYY-MM-DD"),
 ):
     """专业版 Timeline View (支持跨天；单天=小时/session粒度，跨天=天/task粒度)"""
@@ -224,8 +237,6 @@ def view_timeline(
     if from_dt > to_dt:
         print("[red]起始时间不能晚于结束时间[/red]")
         raise typer.Exit()
-
-    console.print("[bold underline green]Timeline View[/bold underline green]\n")
 
     # 收集所有 session
     sessions = []
@@ -248,11 +259,15 @@ def view_timeline(
                 )
         current_day += timedelta(days=1)
 
+
     if not sessions:
         print("[yellow]指定日期范围内没有任务记录[/yellow]")
         return
 
+
     sessions = sorted(sessions, key=lambda s: s["start_time"])
+
+    console.print(f"[bold underline green]Timeline View[/bold underline green] {format_duration(calc_total_minutes(sessions))}\n")
 
     # 单天 vs 跨天分支
     if from_date == to_date:
@@ -277,6 +292,7 @@ def render_single_day_timeline(sessions):
     current_hour = first_start
     idx = 0
     session_count = len(sessions)
+    total_minutes = calc_total_minutes(sessions)
 
     while current_hour < last_end:
         console.print(f"[bold cyan]{current_hour.strftime('%H:%M')}[/bold cyan]")
@@ -292,11 +308,11 @@ def render_single_day_timeline(sessions):
 
             if current_hour <= start < next_hour and end <= next_hour:
                 render_session(
-                    start, end, desc, color, sess["is_running"], max_duration, note
+                    start, end, desc, color, sess["is_running"], max_duration, total_minutes
                 )
                 idx += 1
             elif current_hour <= start < next_hour and end > next_hour:
-                render_session(start, next_hour, desc, color, False, max_duration, note)
+                render_session(start, next_hour, desc, color, False, max_duration, total_minutes, note)
                 sessions[idx]["start_time"] = next_hour.isoformat()
                 break
             else:
@@ -344,9 +360,11 @@ def render_multi_day_timeline(sessions):
 
     # 渲染
     for date, task_infos in sorted(day_task_info.items()):
-        console.print(f"[bold cyan]{date}[/bold cyan]")
 
         max_task_minutes = max(info["minutes"] for info in task_infos.values())
+        total_minutes = sum(info["minutes"] for info in task_infos.values())
+
+        console.print(f"[bold cyan]{date}[/bold cyan] {format_duration(total_minutes)}")
 
         for desc, info in sorted(task_infos.items(), key=lambda x: -x[1]["minutes"]):
             dur_min = info["minutes"]
@@ -356,7 +374,7 @@ def render_multi_day_timeline(sessions):
 
             color = pick_color_rgb(desc)
             bar_len = max(1, int(dur_min / max_task_minutes * 10))
-            bar = "▓" * bar_len
+            bar = '[green]' + "▄" * bar_len + '[/]' + "▁" * (10 - bar_len) + f" {percent(dur_min / total_minutes)}"
             dur_fmt = smart_ljust(format_duration(dur_min), 5)
             desc = smart_truncate(desc, 50)  # 为了加 time_range留空间
             desc = smart_ljust(desc, 50)
@@ -368,7 +386,7 @@ def render_multi_day_timeline(sessions):
 
 
 
-def render_session(start, end, desc, color, is_running, max_duration, note=None):
+def render_session(start, end, desc, color, is_running, max_duration, total_minutes, note=None):
     """渲染单个session块，兼容中文、自动截断、自动对齐，加上轻量note"""
     start_str = start.strftime("%H:%M")
     end_str = end.strftime("%H:%M") if not is_running else "--:--"
@@ -383,9 +401,9 @@ def render_session(start, end, desc, color, is_running, max_duration, note=None)
     dur_fmt = smart_ljust(format_duration(dur_min), 5)
 
     bar_len = max(1, int((dur_min / max_duration) * 10))
-    bar = "▓" * bar_len
+    bar = f"[{'#F59E0B' if is_running else 'green'}]" + "▄" * bar_len + '[/]' + f"[{'#FEF3C7' if is_running else 'white'}]" + "▁" * (10 - bar_len) + '[/]' + f" {percent(dur_min / total_minutes)}"
 
-    line = f"  {time_range} [{color}]{desc}[/] {'[red]' if is_running else ''}{dur_fmt} {bar}{'[/red]' if is_running else ''}"
+    line = f"{' 🕒' if is_running else '   '}{time_range} [{color}]{desc}[/] {dur_fmt} {bar}"
 
     console.print(line)
 
@@ -404,13 +422,14 @@ def view_task(selector: str):
 
     sessions = task["sessions"]
     sessions.sort(key=lambda s: s["start_time"])
+    total_minutes = calc_total_minutes(sessions)
 
     table = Table(show_header=True, header_style="bold blue")
     table.add_column("No.", width=3)
     table.add_column("Start", width=6)
     table.add_column("End", width=6)
     table.add_column("Duration", width=8)
-    table.add_column("")
+    table.add_column(format_duration(total_minutes), width=18)
     table.add_column("Note", overflow="fold")
 
     # 计算最大session时长
@@ -431,7 +450,7 @@ def view_task(selector: str):
         note = sess.get("note", "")
 
         bar_len = max(1, int(dur_min / max_session_minutes * 10))
-        bar = "▓" * bar_len
+        bar = '[green]' + "▄" * bar_len + '[/]' + "▁" * (10 - bar_len) + f" {percent(dur_min / total_minutes)}"
 
         table.add_row(str(idx), start, end, dur_fmt, bar, note)
 
@@ -440,15 +459,23 @@ def view_task(selector: str):
     )
     console.print(table)
 
+def calc_total_minutes(sessions):
+    return sum(
+        duration_minutes(s["start_time"], s["end_time"] or now_iso())
+        for s in sessions
+    )
 
 @app.command("ls")
-def view_tasks(selector: Optional[str] = typer.Argument(None)):
+def view_tasks(
+    selector: Optional[str] = typer.Argument(None),
+    at: Optional[str] = typer.Option(None, "--at", help="日期 YYYY-MM-DD"),
+):
     """按任务维度的表格视图 (带编号)"""
     if selector != None:
         view_task(selector)
         return
 
-    date_str = today_date()
+    date_str = today_date() if at is None else at
     tasks = read_tasks(date_str)
 
     if not tasks:
@@ -502,7 +529,7 @@ def view_tasks(selector: Optional[str] = typer.Argument(None)):
     table.add_column("Start", width=6)
     table.add_column("End", width=6)
     table.add_column("Duration", width=8)
-    table.add_column(format_duration(total_minutes), width=10)
+    table.add_column(format_duration(total_minutes), width=18)
 
     for idx, info in enumerate(task_infos, 1):
         description_str = info["description"]
@@ -517,7 +544,7 @@ def view_tasks(selector: Optional[str] = typer.Argument(None)):
         dur_fmt = format_duration(info["duration"])
 
         bar_len = max(1, int(info["duration"] / top_minutes * 10))
-        bar = "▓" * bar_len
+        bar = '[green]' + "▄" * bar_len + '[/]' + "▁" * (10 - bar_len) + f" {percent(info['duration'] / total_minutes)}"
 
         table.add_row(str(idx), description_str, start_str, end_str, dur_fmt, bar)
 
