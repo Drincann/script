@@ -23,6 +23,7 @@ def format_duration(minutes):
     return f"{hours}h{mins:02d}m"
 
 used_colors = []
+used_colors_map = {}
 
 def color_distance(c1, c2):
     """返回两个 RGB 颜色的欧几里得距离"""
@@ -30,6 +31,10 @@ def color_distance(c1, c2):
 
 def pick_color_rgb(description, max_retry=10, similarity_threshold=30):
     global used_colors
+    global used_colors_map
+
+    if description in used_colors_map:
+        return used_colors_map[description]
 
     salt = 0
     for _ in range(max_retry):
@@ -56,6 +61,7 @@ def pick_color_rgb(description, max_retry=10, similarity_threshold=30):
         # 距离判定：是否太接近已使用的颜色
         if all(color_distance(rgb, used) >= similarity_threshold for used in used_colors):
             used_colors.append(rgb)
+            used_colors_map[description] = f"rgb({rgb[0]},{rgb[1]},{rgb[2]})"
             return f"rgb({rgb[0]},{rgb[1]},{rgb[2]})"
 
         # 否则 hash 加点随机偏移，尝试生成下一个候选颜色
@@ -63,6 +69,7 @@ def pick_color_rgb(description, max_retry=10, similarity_threshold=30):
 
     # 如果多次尝试都太像，就无奈接受最后一个
     used_colors.append(rgb)
+    used_colors_map[description] = f"rgb({rgb[0]},{rgb[1]},{rgb[2]})"
     return f"rgb({rgb[0]},{rgb[1]},{rgb[2]})"
 
 from wcwidth import wcswidth
