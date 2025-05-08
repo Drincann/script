@@ -409,9 +409,12 @@ def render_session(start, end, desc, color, is_running, max_duration, total_minu
 
 
 @app.command("task")
-def view_task(selector: str):
+def view_task(
+    selector: Optional[str] = typer.Argument(None),
+    at: Optional[str] = typer.Option(None, "--at", help="日期 YYYY-MM-DD"),
+):
     """查看单个任务的所有 session 详细信息 (带Time Bar)"""
-    date_str = today_date()
+    date_str = today_date() if at is None else at
     tasks = read_tasks(date_str)
 
     task = select_task(tasks, selector)
@@ -472,7 +475,7 @@ def view_tasks(
 ):
     """按任务维度的表格视图 (带编号)"""
     if selector != None:
-        view_task(selector)
+        view_task(selector, at)
         return
 
     date_str = today_date() if at is None else at
