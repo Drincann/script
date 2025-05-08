@@ -18,8 +18,8 @@ def duration_minutes(start_iso, end_iso):
     return int((end - start).total_seconds() / 60)
 
 def format_duration(minutes):
-    hours = minutes // 60
-    mins = minutes % 60
+    hours = int(minutes) // 60
+    mins = int(minutes) % 60
     return f"{hours}h{mins:02d}m"
 
 used_colors = []
@@ -29,7 +29,7 @@ def color_distance(c1, c2):
     """返回两个 RGB 颜色的欧几里得距离"""
     return ((c1[0]-c2[0])**2 + (c1[1]-c2[1])**2 + (c1[2]-c2[2])**2) ** 0.5
 
-def pick_color_rgb(description, max_retry=10, similarity_threshold=30):
+def pick_color_rgb(description, max_retry=20, similarity_threshold=60):
     global used_colors
     global used_colors_map
 

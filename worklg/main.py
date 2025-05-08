@@ -472,8 +472,81 @@ def calc_total_minutes(sessions):
 def view_tasks(
     selector: Optional[str] = typer.Argument(None),
     at: Optional[str] = typer.Option(None, "--at", help="日期 YYYY-MM-DD"),
+    week: bool = typer.Option(False, "--week", help="查看整周任务汇总"),
+    from_date: Optional[str] = typer.Option(None, "--from", help="起始日期 YYYY-MM-DD"),
+    to_date: Optional[str] = typer.Option(None, "--to", help="结束日期 YYYY-MM-DD"),
 ):
-    """按任务维度的表格视图 (带编号)"""
+    """按任务维度的表格视图（支持单天、周报、跨天聚合）"""
+
+    if selector is not None:
+        view_task(selector, at)
+        return
+
+    # 判断是否为跨天聚合视图
+    if week or from_date or to_date:
+        # ✅ 多日聚合逻辑
+        base = datetime.fromisoformat(at) if at else datetime.today()
+        from_dt = datetime.fromisoformat(from_date) if from_date else (base - timedelta(days=base.weekday()) if week else base)
+        to_dt = datetime.fromisoformat(to_date) if to_date else (from_dt + timedelta(days=6) if week else from_dt)
+
+        if from_dt > to_dt:
+            print("[red]起始日期不能晚于结束日期[/red]")
+            raise typer.Exit()
+
+        from collections import defaultdict
+        grouped = defaultdict(lambda: {
+            "duration": 0,
+            "start_time": None,
+            "end_time": None,
+            "is_running": False
+        })
+
+        current = from_dt
+        while current <= to_dt:
+            date_str = current.strftime("%Y-%m-%d")
+            tasks = read_tasks(date_str)
+            for task in tasks:
+                for sess in task["sessions"]:
+                    start = datetime.fromisoformat(sess["start_time"])
+                    end = datetime.fromisoformat(sess["end_time"] or now_iso())
+                    dur = (end - start).total_seconds() / 60
+                    desc = task["description"]
+                    grouped[desc]["duration"] += dur
+                    grouped[desc]["is_running"] |= (sess["end_time"] is None)
+                    grouped[desc]["start_time"] = min(grouped[desc]["start_time"], start) if grouped[desc]["start_time"] else start
+                    grouped[desc]["end_time"] = max(grouped[desc]["end_time"], end) if grouped[desc]["end_time"] else end
+            current += timedelta(days=1)
+
+        if not grouped:
+            print("[yellow]指定日期范围内没有任务记录[/yellow]")
+            return
+
+        top_minutes = max(g["duration"] for g in grouped.values())
+        total_minutes = sum(g["duration"] for g in grouped.values())
+
+        table = Table(show_header=True, header_style="bold blue")
+        table.add_column("No.", width=3)
+        table.add_column("Task", width=50)
+        table.add_column("Start", width=6)
+        table.add_column("End", width=6)
+        table.add_column("Duration", width=8)
+        table.add_column(f"{format_duration(total_minutes)}", width=18)
+
+        for idx, (desc, g) in enumerate(sorted(grouped.items(), key=lambda x: -x[1]["duration"]), 1):
+            start_str = g["start_time"].strftime("%m-%d")
+            end_str = "[yellow]进行中[/yellow]" if g["is_running"] else g["end_time"].strftime("%m-%d")
+            dur_fmt = format_duration(int(g["duration"]))
+            bar_len = max(1, int(g["duration"] / top_minutes * 10))
+            bar = '[green]' + "▄" * bar_len + '[/]' + "▁" * (10 - bar_len) + f" {percent(g['duration'] / total_minutes)}"
+            table.add_row(str(idx), desc, start_str, end_str, dur_fmt, bar)
+
+        console.print(
+            f"[bold underline green]Task Summary:[/bold underline green] {from_dt.strftime('%Y-%m-%d')} ~ {to_dt.strftime('%Y-%m-%d')}"
+        )
+        console.print(table)
+        return
+
+    # ✅ 默认单天视图逻辑（保留原逻辑）
     if selector != None:
         view_task(selector, at)
         return
