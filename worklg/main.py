@@ -108,7 +108,7 @@ def start(
     elif task is not None:
         print(f"[green]找到任务:[/green] {task['description']} ({task['sessions'][-1]['end_time'][:10]})")
 
-        exists_task = [task for task in tasks if task["description"] == task["description"]]
+        exists_task = [candidate for candidate in tasks if candidate["description"] == task["description"]]
         exists_task = exists_task[0] if len(exists_task) > 0 else None
         if exists_task:
             task = exists_task
