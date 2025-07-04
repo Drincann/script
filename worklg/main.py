@@ -9,7 +9,6 @@ from typing import Optional
 from storage import read_tasks, write_tasks
 from utils import (
     a_month_ago,
-    last_week_monday,
     now_iso,
     percent,
     today_date,
@@ -31,7 +30,8 @@ console = Console()
 
 def select_task(tasks, selector: str):
     """根据编号或者关键词选择已有任务，如果没有匹配，返回 None"""
-    # sort by start_time
+    # sort by staot_time
+
     tasks = merged_by_description(tasks)
     tasks.sort(key=lambda t: datetime.fromisoformat(t["sessions"][-1]["end_time"]))
     if selector.isdigit():
@@ -42,7 +42,7 @@ def select_task(tasks, selector: str):
             print("[red]编号超出范围[/red]")
             raise typer.Exit()
     else:
-        matched = [task for task in tasks if selector in task["description"]]
+        matched = [task for task in reversed(tasks) if selector in task["description"]]
         if len(matched) == 0:
             return None
         elif len(matched) == 1:
@@ -70,6 +70,7 @@ def merged_by_description(tasks):
                 "sessions": []
             }
         merged[desc]["sessions"].extend(task["sessions"])
+        merged[desc]["sessions"].sort(key=lambda s: s["end_time"])
     
     return list(merged.values())
 
@@ -99,16 +100,21 @@ def start(
         search_date = search_date - timedelta(days=1)
 
     task = select_task(history_tasks, selector)
-    if task is not None:
-        print(f"[green]找到任务:[/green] {task['description']} (在 {search_date.strftime('%Y-%m-%d')})")
-        task['sessions'] = []
-        tasks.append(task)
-
     if task is None:
         # 没有匹配，创建新的任务
         task = {"id": gen_id(), "description": selector, "sessions": []}
         tasks.append(task)
         print(f"[green]新建任务:[/green] {selector}")
+    elif task is not None:
+        print(f"[green]找到任务:[/green] {task['description']} ({task['sessions'][-1]['end_time'][:10]})")
+
+        exists_task = [task for task in tasks if task["description"] == task["description"]]
+        exists_task = exists_task[0] if len(exists_task) > 0 else None
+        if exists_task:
+            task = exists_task
+        else:
+            task['sessions'] = []
+            tasks.append(task)
 
     start_at = datetime.now() if at == None else datetime.fromisoformat(f"{date_str}T{at}:00")
 
