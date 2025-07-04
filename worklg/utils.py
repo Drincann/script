@@ -1,6 +1,6 @@
 import colorsys
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 
 def now_iso() -> str:
@@ -8,6 +8,21 @@ def now_iso() -> str:
 
 def today_date() -> str:
     return datetime.now().strftime('%Y-%m-%d')
+
+def last_week_monday() -> datetime:
+    today = datetime.now()
+    days_since_monday = (today.weekday() + 1) % 7  # 0=Monday, 6=Sunday
+    last_monday = today - timedelta(days=days_since_monday + 7)
+    return last_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+
+def a_month_ago() -> datetime:
+    today = datetime.now()
+    return today - timedelta(days=30)
+
+def weekday(date_str: str) -> str:
+    """返回给定日期字符串的星期几"""
+    date = datetime.fromisoformat(date_str)
+    return date.strftime('%A')  # 返回完整的星期几名称，如 'Monday'
 
 def gen_id() -> str:
     return str(uuid.uuid4())[:8]

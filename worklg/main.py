@@ -8,6 +8,8 @@ from typing import Optional
 
 from storage import read_tasks, write_tasks
 from utils import (
+    a_month_ago,
+    last_week_monday,
     now_iso,
     percent,
     today_date,
@@ -17,6 +19,7 @@ from utils import (
     duration_minutes,
     format_duration,
     pick_color_rgb,
+    weekday,
 )
 
 app = typer.Typer()
@@ -29,7 +32,8 @@ console = Console()
 def select_task(tasks, selector: str):
     """根据编号或者关键词选择已有任务，如果没有匹配，返回 None"""
     # sort by start_time
-    tasks.sort(key=lambda t: datetime.fromisoformat(t["sessions"][0]["start_time"]))
+    tasks = merged_by_description(tasks)
+    tasks.sort(key=lambda t: datetime.fromisoformat(t["sessions"][-1]["end_time"]))
     if selector.isdigit():
         index = int(selector) - 1
         if 0 <= index < len(tasks):
@@ -46,7 +50,7 @@ def select_task(tasks, selector: str):
         else:
             print("匹配到多条，请选择：")
             for idx, task in enumerate(matched, 1):
-                print(f"[{idx}] {task['description']}")
+                print(f"[{idx}] ({weekday(task['sessions'][-1]['end_time'][:10])[:3]} {task['sessions'][-1]['end_time'][:10]} {task['sessions'][-1]['end_time'][11:16]}) {task['description']}")
             choice = int(input("请输入编号: ")) - 1
             if 0 <= choice < len(matched):
                 return matched[choice]
@@ -54,11 +58,26 @@ def select_task(tasks, selector: str):
                 print("[red]选择无效[/red]")
                 raise typer.Exit()
 
+def merged_by_description(tasks):
+    """合并相同描述的任务"""
+    merged = {}
+    for task in tasks:
+        desc = task["description"]
+        if desc not in merged:
+            merged[desc] = {
+                "id": task["id"],
+                "description": desc,
+                "sessions": []
+            }
+        merged[desc]["sessions"].extend(task["sessions"])
+    
+    return list(merged.values())
 
 @app.command()
 def start(
     selector: str,
     at: Optional[str] = typer.Option(None, "--at", help="开始时间 hh:mm"),
+    search_from: Optional[str] = typer.Option(None, "--search-from", help="回溯直到这个时间点 (格式 YYYY-MM-DD), 默认仅搜索当天任务"),
 ):
     """开始或继续一个任务 (支持编号/关键词，新建任务也可以；智能连接最近session)"""
     date_str = today_date()
@@ -71,7 +90,19 @@ def start(
                 print("[red]已有正在进行中的任务，请先 stop 或 push[/red]")
                 raise typer.Exit()
 
-    task = select_task(tasks, selector)
+    search_date = datetime.fromisoformat(date_str)
+    history_tasks = []
+    if not search_from:
+        search_from = date_str
+    while search_date >= datetime.fromisoformat(search_from):
+        history_tasks.extend(read_tasks(search_date.strftime("%Y-%m-%d")))
+        search_date = search_date - timedelta(days=1)
+
+    task = select_task(history_tasks, selector)
+    if task is not None:
+        print(f"[green]找到任务:[/green] {task['description']} (在 {search_date.strftime('%Y-%m-%d')})")
+        task['sessions'] = []
+        tasks.append(task)
 
     if task is None:
         # 没有匹配，创建新的任务
@@ -144,7 +175,7 @@ def push(
 ):
     """切换到新的任务 (支持编号/关键词)"""
     stop(from_cmd=True, at=start_at)
-    start(selector, at=start_at)
+    start(selector, at=start_at, search_from=a_month_ago().isoformat())
 
 @app.command()
 def pop(
@@ -224,6 +255,7 @@ def curr():
 def view_timeline(
     from_date: Optional[str] = typer.Option(None, "--from", "--at", help="起始日期 YYYY-MM-DD"),
     to_date: Optional[str] = typer.Option(None, "--to", help="结束日期 YYYY-MM-DD"),
+    filter_str: Optional[str] = typer.Option(None, "--filter", help="只显示任务描述中包含该字符串的任务"),
 ):
     """专业版 Timeline View (支持跨天；单天=小时/session粒度，跨天=天/task粒度)"""
     if not from_date:
@@ -245,6 +277,8 @@ def view_timeline(
         day_str = current_day.strftime("%Y-%m-%d")
         tasks = read_tasks(day_str)
         for task in tasks:
+            if filter_str and filter_str not in task["description"]:
+                continue
             for sess in task["sessions"]:
                 sessions.append(
                     {
@@ -475,6 +509,7 @@ def view_tasks(
     week: bool = typer.Option(False, "--week", help="查看整周任务汇总"),
     from_date: Optional[str] = typer.Option(None, "--from", help="起始日期 YYYY-MM-DD"),
     to_date: Optional[str] = typer.Option(None, "--to", help="结束日期 YYYY-MM-DD"),
+    filter_str: Optional[str] = typer.Option(None, "--filter", help="只显示任务描述中包含该字符串的任务"),
 ):
     """按任务维度的表格视图（支持单天、周报、跨天聚合）"""
 
@@ -511,6 +546,8 @@ def view_tasks(
                     end = datetime.fromisoformat(sess["end_time"] or now_iso())
                     dur = (end - start).total_seconds() / 60
                     desc = task["description"]
+                    if filter_str and filter_str not in desc:
+                        continue
                     grouped[desc]["duration"] += dur
                     grouped[desc]["is_running"] |= (sess["end_time"] is None)
                     grouped[desc]["start_time"] = min(grouped[desc]["start_time"], start) if grouped[desc]["start_time"] else start
